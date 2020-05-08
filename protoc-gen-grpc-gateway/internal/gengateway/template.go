@@ -478,20 +478,20 @@ func local_request_{{.Method.Service.GetName}}_{{.Method.GetName}}_{{.Index}}(ct
 {{$AllowPatchFeature := .AllowPatchFeature}}
 {{template "local-request-func-signature" .}} {
 	var protoReq {{.Method.RequestType.GoType .Method.Service.File.GoPkg.Path}}
-	var metadata runtime.ServerMetadata
+	stream := runtime.NewLocalTransportStream("/{{.Method.Service.GetName}}/{{.Method.GetName}}")
 {{if .Body}}
 	newReader, berr := utilities.IOReaderFactory(req.Body)
 	if berr != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", berr)
+		return nil, stream.Metadata(), status.Errorf(codes.InvalidArgument, "%v", berr)
 	}
 	if err := marshaler.NewDecoder(newReader()).Decode(&{{.Body.AssignableExpr "protoReq"}}); err != nil && err != io.EOF  {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+		return nil, stream.Metadata(), status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 	{{- if and $AllowPatchFeature (eq (.HTTPMethod) "PATCH") (.FieldMaskField) (not (eq "*" .GetBodyFieldPath)) }}
 	if protoReq.{{.FieldMaskField}} == nil || len(protoReq.{{.FieldMaskField}}.GetPaths()) == 0 {
 			_, md := descriptor.ForMessage(protoReq.{{.GetBodyFieldStructName}})
 			if fieldMask, err := runtime.FieldMaskFromRequestBody(newReader(), md); err != nil {
-				return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+				return nil, stream.Metadata(), status.Errorf(codes.InvalidArgument, "%v", err)
 			} else {
 				protoReq.{{.FieldMaskField}} = fieldMask
 			}
@@ -516,7 +516,7 @@ func local_request_{{.Method.Service.GetName}}_{{.Method.GetName}}_{{.Index}}(ct
 	{{$enum := $binding.LookupEnum $param}}
 	val, ok = pathParams[{{$param | printf "%q"}}]
 	if !ok {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", {{$param | printf "%q"}})
+		return nil, stream.Metadata(), status.Errorf(codes.InvalidArgument, "missing parameter %s", {{$param | printf "%q"}})
 	}
 {{if $param.IsNestedProto3}}
 	err = runtime.PopulateFieldFromPath(&protoReq, {{$param | printf "%q"}}, val)
@@ -529,7 +529,7 @@ func local_request_{{.Method.Service.GetName}}_{{.Method.GetName}}_{{.Index}}(ct
 	{{$param.AssignableExpr "protoReq"}}, err = {{$param.ConvertFuncExpr}}(val{{if $param.IsRepeated}}, {{$binding.Registry.GetRepeatedPathParamSeparator | printf "%c" | printf "%q"}}{{end}})
 {{end}}
 	if err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", {{$param | printf "%q"}}, err)
+		return nil, stream.Metadata(), status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", {{$param | printf "%q"}}, err)
 	}
 {{if and $enum $param.IsRepeated}}
 	s := make([]{{$enum.GoType $param.Target.Message.File.GoPkg.Path}}, len(es))
@@ -544,17 +544,17 @@ func local_request_{{.Method.Service.GetName}}_{{.Method.GetName}}_{{.Index}}(ct
 {{end}}
 {{if .HasQueryParam}}
 	if err := req.ParseForm(); err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+		return nil, stream.Metadata(), status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 	if err := runtime.PopulateQueryParameters(&protoReq, req.Form, filter_{{.Method.Service.GetName}}_{{.Method.GetName}}_{{.Index}}); err != nil {
-		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+		return nil, stream.Metadata(), status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 {{end}}
 {{if .Method.GetServerStreaming}}
 	// TODO
 {{else}}
-	msg, err := server.{{.Method.GetName}}(ctx, &protoReq)
-	return msg, metadata, err
+	msg, err := server.{{.Method.GetName}}(grpc.NewContextWithServerTransportStream(ctx, stream), &protoReq)
+	return msg, stream.Metadata(), err
 {{end}}
 }`))
 
